@@ -4,21 +4,50 @@ import { useState, useEffect, useRef } from 'react';
 import { ReactComponent as MySVG } from './ghost.svg';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
-console.log('Fetching from:', `${API_URL}/feed`);
-
 
 interface Line {
   text: string;
   source: string;
   extra?: string;
   image?: string;
+  added?: string;
 }
 
 interface Batch {
   sentences: string[];
   source: string;
   image?: string;
+  added?: string;
   id: number;
+}
+
+// Bold mother/mama/mommy in text
+function BoldedText({ text }: { text: string }) {
+  const pattern = /\b(mother(?:hood|ing|s)?|mama(?:s)?|mommy|maternal)\b/gi;
+  const parts: { text: string; bold: boolean }[] = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ text: text.slice(lastIndex, match.index), bold: false });
+    }
+    parts.push({ text: match[0], bold: true });
+    lastIndex = pattern.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex), bold: false });
+  }
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.bold
+          ? <strong key={i} style={{ fontWeight: 700 }}>{part.text}</strong>
+          : <span key={i}>{part.text}</span>
+      )}
+    </>
+  );
 }
 
 export default function App() {
@@ -41,12 +70,12 @@ export default function App() {
             const current = lines[i];
             const next = lines[i + 1];
 
-            // Group two sentences from same source together
             if (next && next.source === current.source) {
               batches.push({
                 sentences: [current.text, next.text],
                 source: current.source,
                 image: current.image || next.image,
+                added: current.added || next.added,
                 id: idRef.current++
               });
               i += 2;
@@ -55,6 +84,7 @@ export default function App() {
                 sentences: [current.text],
                 source: current.source,
                 image: current.image,
+                added: current.added,
                 id: idRef.current++
               });
               i += 1;
@@ -67,8 +97,6 @@ export default function App() {
     };
 
     fetchFeed();
-
-    // Refresh pool every hour
     const hourly = setInterval(fetchFeed, 3600000);
     return () => clearInterval(hourly);
   }, []);
@@ -86,7 +114,6 @@ export default function App() {
 
       setVisible(false);
 
-      // Small gap between batches
       setTimeout(() => {
         setCurrentBatch(batch);
         setVisible(true);
@@ -102,16 +129,22 @@ export default function App() {
     return () => clearTimeout(initial);
   }, []);
 
-  const sourceLabel = (source: string) => {
-    const labels: Record<string, string> = {
-      wikipedia: 'archive',
-      reddit:    'social',
-      mastodon:  'social',
-      tumblr:    'blog',
-      newspapers:'press',
-      bluesky:   'social',
-    };
-    return labels[source] || source;
+  // Format timestamp as "Mar 12, 2026 · 3:42 PM"
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return '';
+      const date = d.toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric'
+      });
+      const time = d.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', hour12: true
+      });
+      return `${date} · ${time}`;
+    } catch {
+      return '';
+    }
   };
 
   return (
@@ -130,7 +163,7 @@ export default function App() {
           transform: visible ? 'translateY(0)' : 'translateY(12px)',
         }}>
 
-          {/* Photo — only shown if batch has an image */}
+          {/* Photo */}
           {currentBatch?.image && (
             <div style={styles.imageWrap}>
               <img
@@ -138,24 +171,26 @@ export default function App() {
                 alt=""
                 style={styles.image}
                 onError={(e) => {
-                  // Hide broken images silently
                   (e.target as HTMLImageElement).style.display = 'none';
                 }}
               />
             </div>
           )}
 
-          {/* Text sentences */}
+          {/* Text sentences with bolded keywords */}
           {currentBatch?.sentences.map((sentence, i) => (
             <p key={i} style={styles.sentence}>
-              {sentence}
+              <BoldedText text={sentence} />
             </p>
           ))}
 
-          {/* Source label */}
+          {/* Source + date/time tag */}
           {currentBatch && (
             <span style={styles.source}>
-              {sourceLabel(currentBatch.source)}
+              {currentBatch.source}
+              {currentBatch.added && (
+                <> · {formatDate(currentBatch.added)}</>
+              )}
             </span>
           )}
 
